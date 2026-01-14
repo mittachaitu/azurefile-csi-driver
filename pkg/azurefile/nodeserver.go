@@ -600,9 +600,20 @@ func (d *Driver) NodeUnstageVolume(_ context.Context, req *csi.NodeUnstageVolume
 		mc.ObserveOperationWithResult(isOperationSucceeded, VolumeID, volumeID)
 	}()
 
-	klog.V(2).Infof("NodeUnstageVolume: unmount volume %s on %s", volumeID, stagingTargetPath)
-	if err := SMBUnmount(d.mounter, stagingTargetPath, true /*extensiveMountPointCheck*/, d.removeSMBMountOnWindows); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to unmount staging target %s: %v", stagingTargetPath, err)
+	shouldUnmountFromNode := false
+	if os.Getenv("UNMOUNT_FROM_NODE") == "true" {
+		shouldUnmountFromNode = true
+	}
+	if shouldUnmountFromNode {
+		klog.V(2).Infof("NodeUnstageVolume: unmount volume %s on node from env UNMOUNT_FROM_NODE", volumeID)
+		if err := d.unmountWithProxy(context.Background(), stagingTargetPath); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to unmount staging target %s with proxy: %v", stagingTargetPath, err)
+		}
+	} else {
+		klog.V(2).Infof("NodeUnstageVolume: unmount volume %s on %s", volumeID, stagingTargetPath)
+		if err := SMBUnmount(d.mounter, stagingTargetPath, true /*extensiveMountPointCheck*/, d.removeSMBMountOnWindows); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to unmount staging target %s: %v", stagingTargetPath, err)
+		}
 	}
 
 	if runtime.GOOS != "windows" {
@@ -817,6 +828,39 @@ func (d *Driver) mountWithProxy(ctx context.Context, source, target, fsType stri
 		klog.Error("GRPC call returned with an error:", err)
 	}
 	klog.V(2).Infof("mount %s on %s with azurefile proxy completed with error: %v", source, target, err)
+	return err
+}
+
+func (d *Driver) unmountWithProxy(ctx context.Context, target string) error {
+	conn, err := grpc.NewClient(d.azurefileProxyEndpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		klog.Error("failed to connect to azurefile proxy:", err)
+		return err
+	}
+	defer func() {
+		if err := conn.Close(); err != nil {
+			klog.Error("failed to close connection to azurefile proxy:", err)
+		}
+	}()
+	mountClient := NewMountClient(conn)
+	unmountReq := mount_azurefile.UnmountAzureFileRequest{
+		Target: target,
+	}
+	klog.V(2).Infof("begin to unmount with azurefile proxy, target: %s", target)
+	newCtx, cancel := context.WithTimeout(ctx, MountTimeoutInSec*time.Second)
+	defer cancel()
+	execFunc := func() error {
+		_, err := mountClient.service.UnmountAzureFile(newCtx, &unmountReq)
+		return err
+	}
+	timeoutFunc := func() error {
+		return fmt.Errorf("unmount with azurefile proxy timed out after %d seconds: target=%s", MountTimeoutInSec, target)
+	}
+
+	if err = volumehelper.WaitUntilTimeout(MountTimeoutInSec*time.Second, execFunc, timeoutFunc); err != nil {
+		klog.Error("GRPC call returned with an error:", err)
+	}
+	klog.V(2).Infof("unmount %s with azurefile proxy completed with error: %v", target, err)
 	return err
 }
 

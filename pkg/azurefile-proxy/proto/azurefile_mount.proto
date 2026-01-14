@@ -12,6 +12,13 @@ message MountAzureFileRequest {
 
 message MountAzureFileResponse {}
 
+message UnmountAzureFileRequest {
+	string target = 1;
+}
+
+message UnmountAzureFileResponse {}
+
 service MountService {
 	rpc MountAzureFile(MountAzureFileRequest) returns (MountAzureFileResponse) {};
+	rpc UnmountAzureFile(UnmountAzureFileRequest) returns (UnmountAzureFileResponse) {};
 }

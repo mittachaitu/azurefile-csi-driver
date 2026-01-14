@@ -76,6 +76,20 @@ func (server *MountServer) MountAzureFile(_ context.Context,
 	return &mount_azurefile.MountAzureFileResponse{}, nil
 }
 
+func (server *MountServer) UnmountAzureFile(_ context.Context,
+	req *mount_azurefile.UnmountAzureFileRequest,
+) (resp *mount_azurefile.UnmountAzureFileResponse, err error) {
+	target := req.GetTarget()
+	klog.V(2).Infof("Received unmount request for target: %s", target)
+	err = mount_utils.CleanupMountPoint(target, server.mounter, true)
+	if err != nil {
+		klog.Errorf("azurefile unmount of path %s failed: with error: %v", target, err)
+		return nil, fmt.Errorf("azurefile unmount of path %s failed: %v", target, err)
+	}
+	klog.V(2).Infof("azurefile %s successfully unmounted", target)
+	return &mount_azurefile.UnmountAzureFileResponse{}, nil
+}
+
 func RunGRPCServer(
 	mountServer mount_azurefile.MountServiceServer,
 	enableTLS bool,
