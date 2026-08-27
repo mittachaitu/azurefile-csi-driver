@@ -24,9 +24,21 @@ ARG TARGETARCH=amd64
 
 RUN apt update \
     && apt install -y curl \
-    && curl -Lso /tmp/packages-microsoft-prod-22.04.deb https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb \
     && curl -Ls https://github.com/Azure/azure-storage-azcopy/releases/download/v10.32.7/azcopy_linux_${TARGETARCH}_10.32.7.tar.gz \
         | tar xvzf - --strip-components=1 -C /usr/local/bin/ --wildcards "*/azcopy"
+
+FROM ${BASE_IMAGE} AS azfilesauth-builder
+
+ARG AZFILESAUTH_REPOSITORY=https://github.com/Azure/AzFilesAuthenticator.git
+ARG AZFILESAUTH_REF=personal/sprasad/azsdk-identity
+
+RUN apt update \
+    && apt install -y git autoconf automake libtool build-essential python3 libcurl4-openssl-dev libkrb5-dev debhelper-compat \
+    && git clone --depth 1 --branch "${AZFILESAUTH_REF}" "${AZFILESAUTH_REPOSITORY}" /src/azfilesauth \
+    && cd /src/azfilesauth \
+    && autoreconf -fi \
+    && dpkg-buildpackage -us -uc \
+    && cp /src/azfilesauth_*.deb /tmp/azfilesauth.deb
 
 FROM base
 
@@ -35,8 +47,11 @@ ARG binary=./_output/${ARCH}/azurefileplugin
 
 COPY ${binary} /azurefileplugin
 COPY --from=builder --chown=root:root /usr/local/bin/azcopy /usr/local/bin/azcopy
+COPY --from=azfilesauth-builder --chown=root:root /tmp/azfilesauth.deb /azfilesauth.deb
 
-RUN apt update && apt upgrade -y && apt-mark unhold libcap2 && clean-install ca-certificates cifs-utils util-linux e2fsprogs mount udev xfsprogs nfs-common netbase
+RUN apt update && apt upgrade -y && apt-mark unhold libcap2 && clean-install ca-certificates cifs-utils util-linux e2fsprogs mount udev xfsprogs nfs-common netbase libcurl4 libkrb5-3 python3 python3-pip \
+    && dpkg -i /azfilesauth.deb \
+    && rm -f /azfilesauth.deb
 
 COPY ./pkg/azurefile-proxy/*.sh /azurefile-proxy/
 COPY ./pkg/azurefile-proxy/azurefile-proxy.service /azurefile-proxy/
@@ -45,9 +60,6 @@ COPY ./_output/${ARCH}/azurefile-proxy /azurefile-proxy/
 RUN chmod +x /azurefile-proxy/*.sh && \
   chmod +x /azurefile-proxy/azurefile-proxy.service && \
   chmod +x /azurefile-proxy/azurefile-proxy
-
-COPY --from=builder --chown=root:root /tmp/packages-microsoft-prod-22.04.deb /azurefile-proxy/packages-microsoft-prod-22.04.deb
-RUN dpkg -i /azurefile-proxy/packages-microsoft-prod-22.04.deb && apt update && apt install -y azfilesauth=1.0-11 && rm -f /azurefile-proxy/packages-microsoft-prod-22.04.deb
 
 LABEL maintainers="andyzhangx"
 LABEL description="AzureFile CSI Driver"
