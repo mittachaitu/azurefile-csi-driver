@@ -131,6 +131,7 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 	var vnetResourceGroup, vnetName, vnetLinkName, publicNetworkAccess, subnetName, shareNamePrefix, fsGroupChangePolicy, useDataPlaneAPI, privateDNSZoneResourceGroup string
 	var requireInfraEncryption, disableDeleteRetentionPolicy, enableLFS, isMultichannelEnabled, allowSharedKeyAccess, allowCrossTenantReplication *bool
 	var provisionedBandwidthMibps, provisionedIops *int32
+	var enableQubit *bool
 	// set allowBlobPublicAccess as false by default
 	allowBlobPublicAccess := ptr.To(false)
 
@@ -334,6 +335,13 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 			if err != nil {
 				return nil, status.Errorf(codes.InvalidArgument, "invalid %s: %s in storage class", mountWithOAuthTokenField, v)
 			}
+		case enableQubitField:
+			enableQubitVal, err := strconv.ParseBool(v)
+			if err != nil {
+				return nil, status.Errorf(codes.InvalidArgument, "invalid %s: %s in storage class", enableQubit, v)
+			}
+			enableQubit = to.Ptr(enableQubitVal)
+
 		default:
 			return nil, status.Errorf(codes.InvalidArgument, "invalid parameter %q in storage class", k)
 		}
@@ -758,6 +766,7 @@ func (d *Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
 		ProvisionedBandwidthMibps: provisionedBandwidthMibps,
 		ProvisionedIops:           provisionedIops,
 		Metadata:                  map[string]*string{createdByMetadata: ptr.To(d.Name)},
+		EnableQubit:               enableQubit,
 	}
 
 	klog.V(2).Infof("begin to create file share(%s) on account(%s) type(%s) subID(%s) rg(%s) location(%s) size(%d) protocol(%s)", validFileShareName, accountName, sku, subsID, resourceGroup, location, fileShareSize, shareProtocol)

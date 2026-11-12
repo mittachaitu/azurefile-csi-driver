@@ -19,6 +19,9 @@ package azurefile
 import (
 	"context"
 	"fmt"
+	"net/http"
+
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	armstorage "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage/v2"
@@ -80,7 +83,13 @@ func (az *azureFileMgmtClient) CreateFileShare(ctx context.Context, shareOptions
 	if shareOptions.Metadata != nil {
 		shareOps.FileShareProperties.Metadata = shareOptions.Metadata
 	}
-	if _, err := az.fileShareClient.Create(ctx, az.accountOptions.ResourceGroup, az.accountOptions.Name, shareOptions.Name, shareOps, nil); err != nil {
+	createCtx := ctx
+	if shareOptions.EnableQubit != nil && *shareOptions.EnableQubit {
+		createCtx = policy.WithHTTPHeader(ctx, http.Header{
+			"x-ms-scale-mode": []string{"scale"},
+		})
+	}
+	if _, err := az.fileShareClient.Create(createCtx, az.accountOptions.ResourceGroup, az.accountOptions.Name, shareOptions.Name, shareOps, nil); err != nil {
 		return fmt.Errorf("failed to create share %s in account %s: %w", shareOptions.Name, az.accountOptions.Name, err)
 	}
 	klog.V(4).Infof("created share %s in account %s", shareOptions.Name, az.accountOptions.Name)

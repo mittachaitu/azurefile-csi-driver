@@ -182,6 +182,7 @@ const (
 	mountWithManagedIdentityField     = "mountwithmanagedidentity"
 	mountWithOAuthTokenField          = "mountwithoauthtoken"
 	mountWithWITokenField             = "mountwithworkloadidentitytoken"
+	enableQubitField                  = "enablequbit"
 
 	defaultSecretOAuthToken = "oauthtoken"
 

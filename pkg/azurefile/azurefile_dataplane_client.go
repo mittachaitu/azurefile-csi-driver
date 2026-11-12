@@ -22,7 +22,9 @@ import (
 	"net/http"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
+	armstorage "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage/v2"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azfile/service"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azfile/share"
 	"k8s.io/klog/v2"
@@ -84,13 +86,43 @@ func newAzureFileClientWithOAuth(cred azcore.TokenCredential, accountName, stora
 	}, nil
 }
 
+type scaleModeContextKey struct{}
+
+type scaleModePolicy struct{}
+
+func (scaleModePolicy) Do(req *policy.Request) (*http.Response, error) {
+	if enabled, _ := req.Raw().Context().Value(scaleModeContextKey{}).(bool); enabled {
+		req.Raw().Header.Set("x-ms-scale-mode", "scale")
+	}
+	return req.Next()
+}
+
 func (f *azureFileDataplaneClient) CreateFileShare(ctx context.Context, shareOptions *ShareOptions) error {
+	var shareOps share.CreateOptions
 	if shareOptions == nil {
 		return fmt.Errorf("shareOptions of account(%s) is nil", f.accountName)
 	}
-	_, err := f.Client.NewShareClient(shareOptions.Name).Create(ctx, &share.CreateOptions{
-		Quota: to.Ptr(int32(shareOptions.RequestGiB)),
-	})
+	if shareOptions.Protocol == armstorage.EnabledProtocolsNFS {
+		shareOps.EnabledProtocols = to.Ptr(fmt.Sprintf("%s", shareOptions.Protocol))
+	}
+	if shareOptions.RequestGiB > 0 {
+		shareOps.Quota = to.Ptr(int32(shareOptions.RequestGiB))
+	}
+
+	if shareOptions.AccessTier != "" {
+		shareOps.AccessTier = to.Ptr(share.AccessTier(shareOptions.AccessTier))
+	}
+	if shareOptions.RootSquash != "" {
+		shareOps.RootSquash = to.Ptr(share.RootSquash(shareOptions.RootSquash))
+	}
+	if shareOptions.Metadata != nil {
+		shareOps.Metadata = shareOptions.Metadata
+	}
+	createCtx := ctx
+	if shareOptions.EnableQubit != nil && *shareOptions.EnableQubit {
+		createCtx = context.WithValue(ctx, scaleModeContextKey{}, true)
+	}
+	_, err := f.Client.NewShareClient(shareOptions.Name).Create(createCtx, &shareOps)
 	return err
 }
 

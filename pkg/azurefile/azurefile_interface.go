@@ -43,6 +43,8 @@ type ShareOptions struct {
 	ProvisionedBandwidthMibps *int32
 	// The provisioned IOPS of the share. This property is only for file shares created under Files Provisioned v2 account type.
 	ProvisionedIops *int32
+	// EnableQubit indicates whether to provision share through qubit
+	EnableQubit *bool
 }
 
 type azureFileClient interface {
