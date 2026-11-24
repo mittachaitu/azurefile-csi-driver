@@ -41,8 +41,9 @@ if [ "$ENABLE_MI_AUTH" = "true" ];then
 fi
 
 DISTRIBUTION=$($HOST_CMD cat /etc/os-release | grep ^ID= | cut -d'=' -f2 | tr -d '"')
+LINUX_VARIANT_ID=$($HOST_CMD cat /etc/os-release | grep ^VARIANT_ID= | cut -d'=' -f2 | tr -d '"')
 ARCH=$($HOST_CMD uname -m)
-echo "Linux distribution: $DISTRIBUTION, Arch: $ARCH"
+echo "Linux distribution: $DISTRIBUTION, Variant: $LINUX_VARIANT_ID, Arch: $ARCH"
 
 # Only install aznfs-mount on ubuntu and azurelinux
 if [ "$DISTRIBUTION" != "azurelinux" ] && [ "$DISTRIBUTION" != "ubuntu" ];then

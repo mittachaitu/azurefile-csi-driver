@@ -45,7 +45,7 @@ if [ "${INSTALL_AZNFS_MOUNT}" = "true" ];then
       AZNFS_AZURELINUX_VERSION="0.1.712"
     fi
     echo "install aznfs v$AZNFS_AZURELINUX_VERSION...."
-    $HOST_CMD curl -fsSL https://github.com/Azure/AZNFS-mount/releases/download/$AZNFS_AZURELINUX_VERSION/aznfs_install.sh | $HOST_CMD bash
+    $HOST_CMD curl -fsSL https://github.com/Azure/AZNFS-mount/releases/download/"$AZNFS_AZURELINUX_VERSION"/aznfs_install.sh | $HOST_CMD bash
   else
     echo "aznfs-mount is not supported on Linux distribution: $DISTRIBUTION"
     exit 0
@@ -57,10 +57,24 @@ if [ "${INSTALL_AZNFS_MOUNT}" = "true" ];then
   $HOST_CMD systemctl stop aznfswatchdog
 fi
 
+proxyRoot=/etc/extensions/azurefile-proxy
 if [ "${INSTALL_AZUREFILE_PROXY}" = "true" ];then
   # install azurefile-proxy
   echo "install azurefile-proxy...."
+  SystemExtensionVersion=$($HOST_CMD cat /etc/os-release | grep ^SYSEXT_LEVEL= | cut -d'=' -f 2 | tr -d '"')
+  if [ "${LINUX_VARIANT_ID}" = "azurecontainerlinux" ]; then
+    echo "Preparing Azure Container Linux system extension on host"
+    mkdir -p "$proxyRoot/usr/bin" "$proxyRoot/usr/lib/systemd/system" "$proxyRoot/usr/lib/extension-release.d"
+    cat > "$proxyRoot/usr/lib/extension-release.d/extension-release.azurefile-proxy" <<EOF
+ID=azurelinux
+SYSEXT_LEVEL=${SystemExtensionVersion}
+EOF
+    cp /azurefile-proxy/azurefile-proxy "$proxyRoot/usr/bin/azurefile-proxy"
+    cp /azurefile-proxy/azurefile-proxy.service "$proxyRoot/usr/lib/systemd/system/azurefile-proxy.service"
+  fi
+
   updateAzurefileProxy="true"
+  updateRequiredForACL="false"
   if [ -f "/host/usr/bin/azurefile-proxy" ];then
     old=$(sha256sum /host/usr/bin/azurefile-proxy | awk '{print $1}')
     new=$(sha256sum /azurefile-proxy/azurefile-proxy | awk '{print $1}')
@@ -71,13 +85,16 @@ if [ "${INSTALL_AZUREFILE_PROXY}" = "true" ];then
   fi
   if [ "$updateAzurefileProxy" = "true" ];then
     echo "copy azurefile-proxy...."
-    # if it reports "Read-only file system" error here, return as success
-    if ! cp /azurefile-proxy/azurefile-proxy /host/usr/bin/azurefile-proxy --force; then
-      echo "Warning: failed to copy azurefile-proxy, possibly due to read-only file system, continue..."
-      exit 0
+    updateRequiredForACL="true"
+    if [ "${LINUX_VARIANT_ID}" != "azurecontainerlinux" ]; then
+      # if it reports "Read-only file system" error here, return as success
+      if ! cp /azurefile-proxy/azurefile-proxy /host/usr/bin/azurefile-proxy --force; then
+          echo "Warning: failed to copy azurefile-proxy, possibly due to read-only file system, continue..."
+          exit 0
+      fi
+      chmod 755 /host/usr/bin/azurefile-proxy
     fi
     rm -rf /host/"$KUBELET_PATH"/plugins/"$DRIVER_NAME"/azurefile-proxy.sock
-    chmod 755 /host/usr/bin/azurefile-proxy
   fi
 
   updateService="true"
@@ -92,12 +109,20 @@ if [ "${INSTALL_AZUREFILE_PROXY}" = "true" ];then
   if [ "$updateService" = "true" ];then
     echo "copy azurefile-proxy.service...."
     mkdir -p /host/usr/lib/systemd/system
-
-    # if it reports "Read-only file system" error here, return as success
-    if ! cp /azurefile-proxy/azurefile-proxy.service /host/usr/lib/systemd/system/azurefile-proxy.service; then
-      echo "Warning: failed to copy azurefile-proxy.service, possibly due to read-only file system, continue..."
-      exit 0
+    updateRequiredForACL="true"
+    if [ "${LINUX_VARIANT_ID}" != "azurecontainerlinux" ]; then
+      # if it reports "Read-only file system" error here, return as success
+      if ! cp /azurefile-proxy/azurefile-proxy.service /host/usr/lib/systemd/system/azurefile-proxy.service; then
+        echo "Warning: failed to copy azurefile-proxy.service, possibly due to read-only file system, continue..."
+        exit 0
+      fi
     fi
+  fi
+
+  if [ "${LINUX_VARIANT_ID}" = "azurecontainerlinux" ] && [ "$updateRequiredForACL" = "true" ]; then
+    mkdir -p /host/var/lib/extensions/azurefile-proxy
+    cp -a $proxyRoot /host/etc/extensions/azurefile-proxy
+    $HOST_CMD systemd-sysext refresh
   fi
 
   $HOST_CMD systemctl daemon-reload
